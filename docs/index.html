@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WindOps API — Documentação OpenAPI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; }
+    .topbar { background: #0b2239; padding: 12px 20px; color: #fff; font-family: sans-serif; }
+    .topbar h1 { font-size: 16px; margin: 0; }
+    .topbar small { color: #9fc6e8; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>⚡ WindOps API — Contrato OpenAPI</h1>
+    <small>Backend de Operação e Alertas para Ativos de Energia</small>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: './openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset,
+        ],
+      });
+    };
+  </script>
+</body>
+</html>
