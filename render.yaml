@@ -2,7 +2,7 @@ services:
   - type: web
     name: windops-api
     runtime: node
-    repo: https://github.com/REPLACE_WITH_OWNER/REPLACE_WITH_REPO
+    repo: https://github.com/levi-marcos/windops-api
     plan: free
     buildCommand: npm ci && npm run build
     startCommand: npm run start:prod
