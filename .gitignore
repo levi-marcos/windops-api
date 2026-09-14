@@ -13,6 +13,10 @@ npm-debug.log*
 .env.local
 .env.*.local
 
+# Prisma (arquivos locais do banco SQLite)
+prisma/dev.db
+prisma/dev.db-journal
+
 # OS
 .DS_Store
 Thumbs.db

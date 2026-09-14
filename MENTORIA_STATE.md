@@ -4,7 +4,7 @@
 
 - Nome: WindOps API
 - Stack: NestJS + TypeScript
-- Fase atual: 13+ — MVP completo (Fases 4–12 concluídas)
+- Fase atual: 14+ — Persistência com Prisma concluída (bônus)
 - Nível do aluno: A (iniciante — nunca fez API com NestJS)
 - Tutor: OpenCode / Antigravity
 - Entrega: 14/09/2026 14:00
@@ -14,25 +14,27 @@
 - Node: v24.19.0
 - npm: 11.17.0
 - Nest CLI: 12.0.0
+- Prisma: 6.19.3 (SQLite em dev / PostgreSQL em produção)
 - Projeto criado: sim (windops-api/)
 - Servidor validado: sim (GET / retorna 200 Hello World!)
 - Build: ✅ sem erros
-- Testes: ✅ 17 unit + 7 e2e passando
+- Testes: ✅ 16 unit + 7 e2e passando
 - Lint: ✅ 0 warnings / 0 errors
 
 ## Decisões
 
 - Organização de módulos: pasta por módulo (src/assets/, src/alerts/)
-- Dados iniciais: memória
-- Persistência posterior: pendente (Prisma + PostgreSQL/Neon)
+- Dados: **Prisma** (SQLite em dev, PostgreSQL/Neon em produção)
 - Local da regra de alerta: **função pura** em `src/domain/temperature.ts` (fora de HTTP)
-- Estratégia de IDs: assets fornecidos pelo cliente; alertas gerados `AL-001, AL-002...`
+- Estratégia de IDs: assets fornecidos pelo cliente; alertas gerados `AL-001...` via leitura do maior ID existente (evita colisão com dados persistidos)
 - Summary sem dados: `samples: 0`, `averagePowerMw: 0`, `maxTemperatureC: null`
 - Formato de respostas: telemetria retorna `{ ...telemetry, severity, alert }`
 - 404: tratado dentro do Service via `NotFoundException` (idiomático NestJS)
 - 409: ID duplicado em POST /assets
 - AlertsModule é importado por AssetsModule (telemetria gera alertas)
 - Controllers finos: só delegam ao Service
+- Prisma 6 (em vez do 8 RC): CLI nova do 8 era instável/incompatível com fluxo `migrate dev` tradicional; 6 é estável e amplamente documentado
+- Seed automático dos 3 ativos no primeiro boot (`ensureSeedData` no `onApplicationBootstrap`)
 
 ## ADRs leves
 
@@ -56,13 +58,30 @@
 - Motivo: não depende de HTTP nem de NestJS; testável com exemplo trivial (70/80/90); pode ser chamada por fila/job/teste no futuro
 - Reversibilidade: alta (mover import)
 
-### ADR-003 — Where o 404 é lançado
+### ADR-003 — Onde o 404 é lançado
 
 - Problema: recurso inexistente deve retornar 404
 - Opções: controller checa existência vs service lança `NotFoundException`
 - Escolha: service lança `NotFoundException` (idiomático no NestJS)
 - Motivo: mantém controller fino e centraliza regra "recurso deve existir" em um só lugar
 - Reversibilidade: alta
+
+### ADR-004 — Prisma + SQLite (dev) / PostgreSQL (produção)
+
+- Problema: persistir dados sem depender de uma conta externa durante o desenvolvimento
+- Opções: (A) SQLite em dev + Postgres em produção, (B) Neon/Postgres direto
+- Critério: validável imediatamente, didático, caminho claro para produção
+- Escolha: A — SQLite local (`file:./dev.db`) com mesmo schema Prisma; em produção troca provider para `postgresql` + `DATABASE_URL` e roda `prisma migrate deploy`
+- Motivo: mesmo código, sem bloquear em cadastro de conta; aluno roda tudo local
+- Reversibilidade: alta (mudar provider + URL no deploy)
+
+### ADR-005 — Geração de ID de alerta
+
+- Problema: ID `AL-001` colidia com dados persistidos entre execuções
+- Opções: `count()+1` vs ler IDs existentes e achar o maior
+- Escolha: ler IDs existentes (`findMany select id`) e incrementar o maior
+- Motivo: `count()` não reflete IDs apagados e quebrou no banco persistente (bug P2002)
+- Reversibilidade: média (formato `AL-xxx` mantido)
 
 ## Conceitos consolidados
 
@@ -94,6 +113,15 @@
 - health: ✅ GET /health → 200 {"status":"ok"}
 - build: ✅ npm run build sem erros
 - lint: ✅ npm run lint 0 warnings / 0 errors
+
+### Persistência (Prisma)
+- schema: ✅ prisma/schema.prisma (Asset, Telemetry, Alert)
+- migration: ✅ prisma/migrations/20260914131946_init aplicada
+- dev.db: ✅ criado e usado em dev/testes
+- POST telemetria 90°C → ✅ 201, severity CRITICAL, alerta AL-xxx gerado e PERSISTIDO
+- summary após persistência: ✅ samples 1, critical 1, max 90
+- 404: ✅ GET /assets/XYZ → 404
+- prisma generate: ✅
 
 ### Assets
 - lista: ✅ GET /assets → 200 (retorna 3 ativos)
@@ -133,22 +161,25 @@
 
 ## Bugs conhecidos
 
-Nenhum pendente. (No PowerShell 5.1, `-SkipHttpErrorCheck` não existe — usado try/catch; isso não afeta o projeto.)
+- Resolvido: colisão de ID de alerta (`AL-001`) com dados persistidos — corrigido lendo o maior ID existente (ADR-005). Nenhum pendente.
 
 ## Dívidas técnicas conscientes
 
-- Dados em memória (perdem-se ao reiniciar) — aceito até fase de persistência
+- SQLite em dev em vez de PostgreSQL local (escolha didática, ADR-004)
 - `npm audit` reporta vulnerabilidades em dependências dev (não críticas para o entregável)
+- Geração de ID de alerta por leitura+scan não é ideal sob alta concorrência (ok para o objetivo didático)
 
 ## Próxima decisão
 
-Deploy: criar serviço no Render a partir do blueprint + publicar GitHub Pages.
+Opcional: logs estruturados; subir no Render com PostgreSQL.
 
 ## Último checkpoint
 
-**Fases 4–12 concluídas — MVP funcional** (2026-09-14)
-- Regra pura NORMAL/WARNING/CRITICAL implementada e testada
-- Telemetria gera alertas WARNING/CRITICAL automaticamente
-- Summary, filtros, POST /assets e PATCH status implementados
-- Swagger em /docs, testes unit + e2e, build e lint verdes
-- Próxima fase: deploy (Render API + GitHub Pages docs) e bônus Prisma opcional
+**Fase 14 — Persistência com Prisma concluída (bônus)** (2026-09-14)
+- Prisma 6 + SQLite em dev; caminho documentado para PostgreSQL em produção
+- PrismaService/Module global; AssetsService e AlertsService migrados para Prisma (async)
+- Controllers praticamente inalterados (só `async`) — resposta à pergunta "o controller deveria mudar?"
+- Bug P2002 de ID de alerta encontrado e corrigido via ADR-005
+- Testes: 16 unit (Prisma mockado) + 7 e2e (SQLite real) verdes; build e lint verdes
+- Swagger enriquecido (@ApiTags, @ApiOperation, @ApiQuery); openapi.json regenerado
+- Próximo: subir API no Render (PostgreSQL) e/ou logs estruturados

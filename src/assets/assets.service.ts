@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { AlertsService, Alert } from '../alerts/alerts.service.js';
 import { classifyTemperature, TemperatureSeverity } from '../domain/temperature.js';
 import {
@@ -8,23 +9,10 @@ import {
 } from './dto/create-asset.dto.js';
 import { CreateTelemetryDto } from './dto/create-telemetry.dto.js';
 import { UpdateAssetStatusDto } from './dto/update-asset-status.dto.js';
+import type { Asset as PrismaAsset, Telemetry as PrismaTelemetry } from '@prisma/client';
 
-export interface Asset {
-  id: string;
-  name: string;
-  type: AssetType;
-  status: AssetStatus;
-  ratedPowerMw: number;
-  location: string;
-}
-
-export interface Telemetry {
-  assetId: string;
-  powerMw: number;
-  windSpeedMs: number | null;
-  temperatureC: number;
-  timestamp: string;
-}
+export type Asset = PrismaAsset;
+export type Telemetry = PrismaTelemetry;
 
 export interface TelemetryResult extends Telemetry {
   severity: TemperatureSeverity;
@@ -42,84 +30,107 @@ export interface AssetSummary {
 
 @Injectable()
 export class AssetsService {
-  private readonly telemetryByAsset = new Map<string, Telemetry[]>();
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly alertsService: AlertsService,
+  ) {}
 
-  private readonly assets: Asset[] = [
-    {
-      id: 'WT-001',
-      name: 'Aerogerador 01',
-      type: AssetType.WIND_TURBINE,
-      status: AssetStatus.ONLINE,
-      ratedPowerMw: 3.2,
-      location: 'Parque Demo A',
-    },
-    {
-      id: 'WT-002',
-      name: 'Aerogerador 02',
-      type: AssetType.WIND_TURBINE,
-      status: AssetStatus.ONLINE,
-      ratedPowerMw: 2.8,
-      location: 'Parque Demo A',
-    },
-    {
-      id: 'PV-001',
-      name: 'Painel Solar 01',
-      type: AssetType.SOLAR_ARRAY,
-      status: AssetStatus.MAINTENANCE,
-      ratedPowerMw: 1.5,
-      location: 'Parque Demo B',
-    },
-  ];
+  async onApplicationBootstrap() {
+    await this.ensureSeedData();
+  }
 
-  constructor(private readonly alertsService: AlertsService) {}
+  private async ensureSeedData() {
+    const count = await this.prisma.asset.count();
+    if (count > 0) return;
 
-  findAll(status?: string, type?: string): Asset[] {
-    return this.assets.filter((asset) => {
-      if (status && asset.status !== status) return false;
-      if (type && asset.type !== type) return false;
-      return true;
+    await this.prisma.asset.createMany({
+      data: [
+        {
+          id: 'WT-001',
+          name: 'Aerogerador 01',
+          type: AssetType.WIND_TURBINE,
+          status: AssetStatus.ONLINE,
+          ratedPowerMw: 3.2,
+          location: 'Parque Demo A',
+        },
+        {
+          id: 'WT-002',
+          name: 'Aerogerador 02',
+          type: AssetType.WIND_TURBINE,
+          status: AssetStatus.ONLINE,
+          ratedPowerMw: 2.8,
+          location: 'Parque Demo A',
+        },
+        {
+          id: 'PV-001',
+          name: 'Painel Solar 01',
+          type: AssetType.SOLAR_ARRAY,
+          status: AssetStatus.MAINTENANCE,
+          ratedPowerMw: 1.5,
+          location: 'Parque Demo B',
+        },
+      ],
     });
   }
 
-  findOne(id: string): Asset {
-    const asset = this.assets.find((item) => item.id === id);
+  async findAll(status?: string, type?: string): Promise<Asset[]> {
+    return this.prisma.asset.findMany({
+      where: {
+        ...(status ? { status } : {}),
+        ...(type ? { type } : {}),
+      },
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  async findOne(id: string): Promise<Asset> {
+    const asset = await this.prisma.asset.findUnique({ where: { id } });
     if (!asset) {
       throw new NotFoundException(`Asset ${id} not found`);
     }
     return asset;
   }
 
-  create(dto: CreateAssetDto): Asset {
-    if (this.assets.some((asset) => asset.id === dto.id)) {
+  async create(dto: CreateAssetDto): Promise<Asset> {
+    const existing = await this.prisma.asset.findUnique({
+      where: { id: dto.id },
+    });
+    if (existing) {
       throw new ConflictException(`Asset ${dto.id} already exists`);
     }
 
-    const asset: Asset = {
-      id: dto.id,
-      name: dto.name,
-      type: dto.type,
-      status: dto.status ?? AssetStatus.ONLINE,
-      ratedPowerMw: dto.ratedPowerMw,
-      location: dto.location,
-    };
-    this.assets.push(asset);
-    return asset;
+    return this.prisma.asset.create({
+      data: {
+        id: dto.id,
+        name: dto.name,
+        type: dto.type,
+        status: dto.status ?? AssetStatus.ONLINE,
+        ratedPowerMw: dto.ratedPowerMw,
+        location: dto.location,
+      },
+    });
   }
 
-  updateStatus(id: string, dto: UpdateAssetStatusDto): Asset {
-    const asset = this.findOne(id);
-    asset.status = dto.status;
-    return asset;
+  async updateStatus(id: string, dto: UpdateAssetStatusDto): Promise<Asset> {
+    await this.findOne(id);
+    return this.prisma.asset.update({
+      where: { id },
+      data: { status: dto.status },
+    });
   }
 
-  addTelemetry(assetId: string, dto: CreateTelemetryDto): TelemetryResult {
-    this.findOne(assetId);
+  async addTelemetry(
+    assetId: string,
+    dto: CreateTelemetryDto,
+  ): Promise<TelemetryResult> {
+    await this.findOne(assetId);
 
     const severity = classifyTemperature(dto.temperatureC);
+
     const alert =
       severity === 'NORMAL'
         ? null
-        : this.alertsService.create({
+        : await this.alertsService.create({
             assetId,
             severity,
             type: 'HIGH_TEMPERATURE',
@@ -130,47 +141,59 @@ export class AssetsService {
             timestamp: dto.timestamp,
           });
 
-    const telemetry: Telemetry = {
-      assetId,
-      powerMw: dto.powerMw,
-      windSpeedMs: dto.windSpeedMs ?? null,
-      temperatureC: dto.temperatureC,
-      timestamp: dto.timestamp,
-    };
-
-    const readings = this.telemetryByAsset.get(assetId) ?? [];
-    readings.push(telemetry);
-    this.telemetryByAsset.set(assetId, readings);
+    const telemetry = await this.prisma.telemetry.create({
+      data: {
+        assetId,
+        powerMw: dto.powerMw,
+        windSpeedMs: dto.windSpeedMs ?? null,
+        temperatureC: dto.temperatureC,
+        timestamp: dto.timestamp,
+      },
+    });
 
     return { ...telemetry, severity, alert };
   }
 
-  findTelemetry(assetId: string): Telemetry[] {
-    this.findOne(assetId);
-    return this.telemetryByAsset.get(assetId) ?? [];
+  async findTelemetry(assetId: string): Promise<Telemetry[]> {
+    await this.findOne(assetId);
+    return this.prisma.telemetry.findMany({
+      where: { assetId },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
-  getSummary(assetId: string): AssetSummary {
-    const readings = this.findTelemetry(assetId);
-    const alerts = this.alertsService.findAll({ assetId });
+  async getSummary(assetId: string): Promise<AssetSummary> {
+    await this.findOne(assetId);
+
+    const [readings, alertCounts] = await Promise.all([
+      this.prisma.telemetry.findMany({ where: { assetId } }),
+      this.prisma.alert.groupBy({
+        by: ['severity'],
+        where: { assetId },
+        _count: true,
+      }),
+    ]);
 
     const samples = readings.length;
     const averagePowerMw =
       samples === 0
         ? 0
-        : readings.reduce((sum, item) => sum + item.powerMw, 0) / samples;
+        : readings.reduce((sum, r) => sum + r.powerMw, 0) / samples;
     const maxTemperatureC =
       samples === 0
         ? null
-        : Math.max(...readings.map((item) => item.temperatureC));
+        : Math.max(...readings.map((r) => r.temperatureC));
+
+    const countBySeverity = (severity: string) =>
+      alertCounts.find((g) => g.severity === severity)?._count ?? 0;
 
     return {
       assetId,
       samples,
       averagePowerMw: Number(averagePowerMw.toFixed(2)),
       maxTemperatureC,
-      warningAlerts: alerts.filter((item) => item.severity === 'WARNING').length,
-      criticalAlerts: alerts.filter((item) => item.severity === 'CRITICAL').length,
+      warningAlerts: countBySeverity('WARNING'),
+      criticalAlerts: countBySeverity('CRITICAL'),
     };
   }
 }

@@ -17,6 +17,7 @@ API REST que centraliza informações operacionais de ativos de geração renov�
 - [Endpoints](#-endpoints)
 - [Exemplos de uso](#-exemplos-de-uso)
 - [Códigos de erro](#-códigos-de-erro)
+- [Persistência](#-persistência)
 - [Instalação](#%EF%B8%8F-instalação)
 - [Testes](#-testes)
 - [Deploy](#-deploy)
@@ -31,12 +32,12 @@ API REST que centraliza informações operacionais de ativos de geração renov�
 |---|---|
 | NestJS 12 | Framework backend |
 | TypeScript | Linguagem |
+| Prisma 6 + SQLite (dev) / PostgreSQL (prod) | ORM e persistência |
 | class-validator / class-transformer | Validação de DTOs (ValidationPipe) |
 | Swagger / OpenAPI | Documentação interativa em `/docs` |
 | Vitest + Supertest | Testes unitários e e2e |
 
-**Persistência atual:** dados em memória (arrays e `Map`).
-**Próximo passo (bônus):** Prisma + PostgreSQL/Neon.
+**Persistência atual:** Prisma em PostgreSQL (produção) e SQLite (desenvolvimento local).
 
 ---
 
@@ -214,6 +215,53 @@ curl "http://localhost:3000/alerts?severity=CRITICAL"
 
 ---
 
+## 💾 Persistência
+
+**ANTES (dados em memória):**
+```text
+Service
+    ↓
+Array em memória  ← reiniciou, perdeu
+```
+
+**DEPOIS (banco via Prisma):**
+```text
+Service
+    ↓
+PrismaService
+    ↓
+SQLite (dev) / PostgreSQL (produção)
+```
+
+### Modelos (schema em `prisma/schema.prisma`)
+- **Asset** — ativo; o `id` é a chave primária.
+- **Telemetry** — leitura; pertence a um Asset (relação `N:1`).
+- **Alert** — alerta; pertence a um Asset (relação `N:1`), gerado na telemetria.
+
+### Pergunta-chave da mentoria
+> Se trocarmos o banco, o **Controller** deveria mudar?
+
+Não. Os controllers continuam chamando `assetsService.addTelemetry(...)` como antes — só a implementação interna do Service mudou (de array para `prisma.telemetry.create`). A troca memória → banco ficou encapsulada atrás dos mesmos métodos.
+
+### Desenvolvimento local (SQLite)
+```bash
+# .env contém: DATABASE_URL="file:./dev.db"
+npx prisma migrate dev          # cria/atualiza o banco e aplica migrations
+npm run start:dev
+```
+
+### Produção (PostgreSQL/Neon)
+```bash
+# 1. troque o provider no prisma/schema.prisma: sqlite → postgresql
+# 2. defina a URL, ex.:
+#    DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"
+# 3. gere a cli e aplique:
+npx prisma generate
+npx prisma migrate deploy
+```
+
+---
+
 ## 🛠️ Instalação
 
 ```bash
@@ -224,24 +272,27 @@ cd windops-api
 # 2. dependências
 npm install
 
-# 3. desenvolvimento (watch mode)
+# 3. preparar o banco (cria prisma/dev.db + cliente)
+npx prisma migrate dev
+
+# 4. desenvolvimento (watch mode)
 npm run start:dev
 
-# 4. produção
+# 5. produção
 npm run build && npm run start:prod
 ```
 
-A API sobe em `http://localhost:3000` (respeita `PORT` se definida).
+A API sobe em `http://localhost:3000` (respeita `PORT` se definida). Os 3 ativos de exemplo (`WT-001`, `WT-002`, `PV-001`) são semeados automaticamente no primeiro boot.
 
 ---
 
 ## 🧪 Testes
 
 ```bash
-# unitários (regra de temperatura, service de assets)
+# unitários (regra de temperatura, service de assets — Prisma mockado)
 npm run test
 
-# e2e (contratos HTTP completos: health, assets, 404, 400, telemetria, alertas, summary)
+# e2e (contratos HTTP completos com SQLite real)
 npm run test:e2e
 
 # build de produção
@@ -265,9 +316,10 @@ Cobertura principal do comportamento:
 ### API (Render) — deploy gratuito
 1. Crie um repositório no GitHub com este código.
 2. Acesse: `https://dashboard.render.com/blueprint?repo=SEU_USUARIO/SEU_REPO` (o blueprint `render.yaml` já está configurado).
-3. Confirme e aguarde o build. A API ficará em uma URL `https://windops-api.onrender.com`.
+3. Associe um banco PostgreSQL (New → PostgreSQL) e preencha a var `DATABASE_URL` no serviço.
+4. Confirme o deploy. A API ficará em `https://windops-api.onrender.com`.
 
-> Alternativa: Render → New → Web Service → conecte o repo → build: `npm ci && npm run build` → start: `npm run start:prod`. A aplicação lê `process.env.PORT` automaticamente.
+> O comando `npx prisma migrate deploy` já roda no `startCommand` e aplica as migrations automaticamente.
 
 ### Documentação (GitHub Pages)
 A pasta `docs/` contém uma página Swagger UI estática (carregada por CDN) que consome `docs/openapi.json`.
@@ -282,6 +334,9 @@ A pasta `docs/` contém uma página Swagger UI estática (carregada por CDN) que
 src/
 ├── domain/
 │   └── temperature.ts          # função pura da regra de classificação
+├── prisma/
+│   ├── prisma.service.ts       # cliente Prisma (conecta/desconecta)
+│   └── prisma.module.ts        # módulo global que expõe o PrismaService
 ├── assets/
 │   ├── dto/
 │   │   ├── create-asset.dto.ts
@@ -297,12 +352,21 @@ src/
 ├── app.controller.ts           # GET /health
 ├── app.module.ts
 └── main.ts                     # bootstrap + ValidationPipe + Swagger
+prisma/
+│   ├── schema.prisma            # modelos Asset, Telemetry, Alert
+│   └── migrations/              # SQL de migração versionado
 docs/                           # página estática do Swagger (GitHub Pages)
-render.yaml                     # blueprint de deploy no Render
 test/                           # testes e2e
+render.yaml                     # blueprint de deploy no Render
 ```
 
-**Decisão de arquitetura:** `AlertsModule` é importado por `AssetsModule`, pois a telemetria gera alertas. O controller permanece fino (delega tudo), e a regra de classificação vive fora de HTTP (função pura) — substituível por Prisma/PostgreSQL sem tocar em controllers.
+**Fluxo de dependências (baby):**
+```text
+PrismaModule (@Global)  →  injeta PrismaService  →  usado por AssetsService e AlertsService
+AssetsModule            →  importa AlertsModule   →  telemetria gera alertas
+```
+
+**Decisão de arquitetura:** a regra de classificação vive em função pura (fora de HTTP). Serviços usam Prisma e se tornaram `async` (o controller continua igual, só devolvendo Promises). Tudo encapsulado atrás dos mesmos métodos — pronta para trocar de banco sem tocar na camada HTTP.
 
 ---
 
@@ -317,5 +381,5 @@ test/                           # testes e2e
 - [x] `GET /assets/:id/summary`
 - [x] Swagger em `/docs`
 - [x] Testes (unit + e2e)
-- [ ] Prisma + PostgreSQL/Neon (trocar memória por banco sem mudar controllers)
+- [x] Prisma + SQLite (dev) / PostgreSQL (produção) — persistência real
 - [ ] Logs estruturados

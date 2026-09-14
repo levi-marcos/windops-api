@@ -1,0 +1,47 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Asset {
+  id          String     @id
+  name        String
+  type        String
+  status      String
+  ratedPowerMw Float
+  location    String
+  telemetries Telemetry[]
+  alerts      Alert[]
+  createdAt   DateTime   @default(now())
+}
+
+model Telemetry {
+  id           Int    @id @default(autoincrement())
+  assetId      String
+  asset        Asset  @relation(fields: [assetId], references: [id])
+  powerMw      Float
+  windSpeedMs  Float?
+  temperatureC Float
+  timestamp    String
+  createdAt    DateTime @default(now())
+
+  @@index([assetId])
+}
+
+model Alert {
+  id        String   @id
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  severity  String
+  type      String
+  message   String
+  timestamp String
+  createdAt DateTime @default(now())
+
+  @@index([assetId])
+  @@index([severity])
+}
