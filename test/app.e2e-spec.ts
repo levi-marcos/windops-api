@@ -103,4 +103,23 @@ describe('WindOps API (e2e)', () => {
     expect(summary.body.maxTemperatureC).toBe(90);
     expect(summary.body.criticalAlerts).toBeGreaterThanOrEqual(1);
   });
+
+  it('GET /dashboard/overview → 200 com KPIs agregados consistentes', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/dashboard/overview')
+      .expect(200);
+
+    expect(res.body.totalAssets).toBe(3);
+    expect(res.body.onlineAssets).toBeGreaterThanOrEqual(1);
+    expect(res.body.attentionAssets).toBeGreaterThanOrEqual(0);
+    expect(res.body.maintenanceAssets).toBeGreaterThanOrEqual(1);
+    expect(res.body.totalAlerts).toBeGreaterThanOrEqual(0);
+    expect(res.body.criticalAlerts).toBeLessThanOrEqual(res.body.totalAlerts);
+
+    const sumByStatus =
+      res.body.onlineAssets +
+      res.body.attentionAssets +
+      res.body.maintenanceAssets;
+    expect(sumByStatus).toBe(res.body.totalAssets);
+  });
 });
