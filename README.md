@@ -250,12 +250,12 @@ npx prisma migrate dev          # cria/atualiza o banco e aplica migrations
 npm run start:dev
 ```
 
-### Produção (PostgreSQL/Neon)
+### Produção (PostgreSQL)
 ```bash
-# 1. troque o provider no prisma/schema.prisma: sqlite → postgresql
-# 2. defina a URL, ex.:
+# O provider já é postgresql (schema.prisma) e a migration inicial está incluída.
+# Defina a URL, ex.:
 #    DATABASE_URL="postgresql://user:password@host:5432/dbname?schema=public"
-# 3. gere a cli e aplique:
+# gere o client e aplique as migrations:
 npx prisma generate
 npx prisma migrate deploy
 ```
@@ -316,8 +316,8 @@ Cobertura principal do comportamento:
 ### API (Render) — deploy gratuito
 1. Crie um repositório no GitHub com este código.
 2. Acesse: `https://dashboard.render.com/blueprint?repo=SEU_USUARIO/SEU_REPO` (o blueprint `render.yaml` já está configurado).
-3. Associe um banco PostgreSQL (New → PostgreSQL) e preencha a var `DATABASE_URL` no serviço.
-4. Confirme o deploy. A API ficará em `https://windops-api.onrender.com`.
+3. O blueprint já cria o **PostgreSQL** (`windops-db`, free) e liga `DATABASE_URL` automaticamente.
+4. Confirme o deploy. A API ficará em `https://windops-api-XXX.onrender.com` (subdomínio da sua conta).
 
 > O comando `npx prisma migrate deploy` já roda no `startCommand` e aplica as migrations automaticamente.
 
