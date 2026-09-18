@@ -4,10 +4,18 @@ services:
     runtime: node
     repo: https://github.com/levi-marcos/windops-api
     plan: free
+    region: oregon
     buildCommand: npm ci && npx prisma generate && npm run build
     startCommand: npx prisma migrate deploy && npm run start:prod
     envVars:
       - key: NODE_VERSION
         value: 24
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: windops-db
+          property: connectionString
+
+databases:
+  - name: windops-db
+    plan: free
+    region: oregon
